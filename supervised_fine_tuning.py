@@ -1,0 +1,183 @@
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, random_split
+from networks import DepthDecoder, ResnetEncoder
+from utils import normalize_image
+from datasets.ml_dataset import DepthDataset
+from torchvision import transforms
+import os
+
+from torch.utils.tensorboard import SummaryWriter
+
+# Paths
+img_dir = "datasets/atlas-tiny/image/"
+depth_dir = "datasets/atlas-tiny/depth/"
+save_path = "fine_tuned/"
+model_path = "models/mono_1024x320/"#../pivot/dfvo/model_zoo/depth/nyuv2/supervised/"
+log_dir = "runs/fine_tuning"  # Directory for TensorBoard logs
+
+# Hyperparameters
+batch_size = 4
+learning_rate = 1e-5
+num_epochs = 1
+img_size = (640, 640)  # Image dimensions
+
+# Full dataset (this is the entire dataset, no split yet)
+full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size)
+
+# Split dataset into 80% train, 10% validation, 10% test
+train_size = int(0.8 * len(full_dataset))
+val_size = int(0.1 * len(full_dataset))
+test_size = len(full_dataset) - train_size - val_size
+
+# Create the splits
+train_dataset, val_dataset, test_dataset = random_split(full_dataset, [train_size, val_size, test_size])
+
+# Create DataLoaders for each subset
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+# Load Monodepth2 Model
+encoder = ResnetEncoder(18, pretrained=True)
+depth_decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc)
+
+# Load pre-trained weights
+encoder.load_state_dict(torch.load(model_path + "encoder.pth"), strict=False)
+depth_decoder.load_state_dict(torch.load(model_path + "depth.pth"))
+
+# Set to training mode
+encoder.train()
+depth_decoder.train()
+
+# Freeze layers (optional)
+# Uncomment and adjust these lines to freeze specific layers in the encoder
+# for param in encoder.parameters():
+#     param.requires_grad = False
+
+# Optionally, unfreeze specific layers (e.g., the last few layers)
+# for param in encoder.layer4.parameters():
+#     param.requires_grad = True
+
+# Now, only the layers that are not frozen will be trained (e.g., the decoder and unfrozen encoder layers)
+
+# Move to GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+encoder = encoder.to(device)
+depth_decoder = depth_decoder.to(device)
+
+# Loss function
+loss_fn = nn.MSELoss()  # Mean Squared Error for depth supervision
+
+# Optimizer
+optimizer = torch.optim.Adam(list(encoder.parameters()) + list(depth_decoder.parameters()), lr=learning_rate)
+
+# TensorBoard writer
+writer = SummaryWriter(log_dir)
+
+# Helper function for validation/testing
+def evaluate_model(loader, encoder, depth_decoder, loss_fn, device):
+    encoder.eval()
+    depth_decoder.eval()
+    total_loss = 0
+    total_mae = 0
+    total_rmse = 0
+    count = 0
+
+    with torch.no_grad():
+        for batch in loader:
+            images = batch["image"].to(device)
+            gt_depth = batch["depth"].to(device)
+
+            features = encoder(images)
+            outputs = depth_decoder(features)
+            pred_depth = outputs[("disp", 0)]
+
+            loss = loss_fn(pred_depth, gt_depth)
+            total_loss += loss.item()
+
+            mae = torch.mean(torch.abs(pred_depth - gt_depth))
+            rmse = torch.sqrt(torch.mean((pred_depth - gt_depth) ** 2))
+
+            total_mae += mae.item()
+            total_rmse += rmse.item()
+            count += 1
+
+    avg_loss = total_loss / count
+    avg_mae = total_mae / count
+    avg_rmse = total_rmse / count
+
+    return avg_loss, avg_mae, avg_rmse
+
+# Training loop
+for epoch in range(num_epochs):
+    epoch_loss = 0
+    encoder.train()
+    depth_decoder.train()
+
+    for step, batch in enumerate(train_loader):
+        images = batch["image"].to(device)
+        gt_depth = batch["depth"].to(device)
+
+        # Forward pass
+        features = encoder(images)
+        outputs = depth_decoder(features)
+        
+        # Monodepth2 outputs a dictionary; get the predicted depth
+        pred_depth = outputs[("disp", 0)]  # Output at the highest resolution
+
+        # Compute supervised loss
+        loss = loss_fn(pred_depth, gt_depth)
+
+        # Backpropagation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        epoch_loss += loss.item()
+
+        # Log training loss
+        if step % 10 == 0:
+            writer.add_scalar("Train/Loss", loss.item(), epoch * len(train_loader) + step)
+
+        # Log images every 100 steps
+        if step % 100 == 0:
+            writer.add_images("Train/Input Images", images, epoch)
+            writer.add_images("Train/Predicted Depth", pred_depth, epoch)
+            writer.add_images("Train/Ground Truth Depth", gt_depth, epoch)
+
+    # Validation
+    val_loss, val_mae, val_rmse = evaluate_model(val_loader, encoder, depth_decoder, loss_fn, device)
+    writer.add_scalar("Validation/Loss", val_loss, epoch)
+    writer.add_scalar("Validation/MAE", val_mae, epoch)
+    writer.add_scalar("Validation/RMSE", val_rmse, epoch)
+
+    print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {epoch_loss / len(train_loader)}, Val Loss: {val_loss}")
+
+# Test evaluation
+test_loss, test_mae, test_rmse = evaluate_model(test_loader, encoder, depth_decoder, loss_fn, device)
+writer.add_scalar("Test/Loss", test_loss, num_epochs)
+writer.add_scalar("Test/MAE", test_mae, num_epochs)
+writer.add_scalar("Test/RMSE", test_rmse, num_epochs)
+
+print(f"Test Loss: {test_loss}, Test MAE: {test_mae}, Test RMSE: {test_rmse}")
+
+# Check if the folder exists
+if not os.path.exists(model_path+save_path):
+    # Create the folder if it doesn't exist
+    os.makedirs(model_path+save_path)
+    print(f"Folder created at {model_path+save_path}")
+
+# Save fine-tuned model
+torch.save({
+    "encoder": encoder.state_dict(),
+}, model_path+save_path+"encoder.pth")
+print(f"Encoder model saved to {model_path+save_path}encoder.pth")
+
+torch.save({
+    "depth_decoder": depth_decoder.state_dict()
+}, model_path+save_path+"depth.pth")
+print(f"Decoder model saved to {model_path+save_path}depth.pth")
+
+# Close TensorBoard writer
+writer.close()
