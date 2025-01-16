@@ -3,6 +3,8 @@ from torch.utils.data import Dataset
 from PIL import Image
 import os
 from torchvision import transforms
+import torch
+import torch.nn as nn
 
 #DEBUG
 from torch.utils.data import DataLoader
@@ -92,6 +94,29 @@ class DepthDataset(Dataset):
         # plt.show()
         # Return a dictionary with image and depth tensor
         return {'image': image, 'depth': depth}
+
+class ScaleInvariantLoss(nn.Module):
+    def __init__(self):
+        super(ScaleInvariantLoss, self).__init__()
+    
+    def forward(self, predicted, ground_truth):
+        # Apply log to predicted and ground truth depth maps
+        log_pred = torch.log(predicted + 1e-8)  # Adding epsilon to avoid log(0)
+        log_gt = torch.log(ground_truth + 1e-8)
+        
+        # Compute d_i (difference between predicted and ground truth log depths)
+        d = log_pred - log_gt
+        
+        # Compute the two terms in the loss
+        n = d.numel()  # Total number of pixels
+        term1 = torch.sum(d ** 2) / n
+        term2 = (torch.sum(d) ** 2) / (n ** 2)
+        
+        # Scale-invariant loss
+        loss = term1 - term2
+        
+        return loss
+
 
 # DEBUG
 # img_dir = "../datasets/atlas-tiny/image/"
