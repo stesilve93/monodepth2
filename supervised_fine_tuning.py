@@ -191,14 +191,14 @@ if not os.path.exists(model_path+save_path):
     print(f"Folder created at {model_path+save_path}")
 
 # Save fine-tuned model
-torch.save({
-    "encoder": encoder.state_dict(),
-}, model_path+save_path+"/encoder.pth")
+toSave = encoder.state_dict()
+toSave['height'] = img_size[0]
+toSave['width'] = img_size[1]
+toSave['use_stereo'] = False
+torch.save(toSave, model_path+save_path+"/encoder.pth")
 print(f"Encoder model saved to {model_path+save_path}/encoder.pth")
 
-torch.save({
-    "depth_decoder": depth_decoder.state_dict()
-}, model_path+save_path+"/depth.pth")
+torch.save(depth_decoder.state_dict(), model_path+save_path+"/depth.pth")
 print(f"Decoder model saved to {model_path+save_path}/depth.pth")
 
 # Close TensorBoard writer
