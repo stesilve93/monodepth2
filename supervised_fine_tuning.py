@@ -14,8 +14,8 @@ img_dir = "datasets/atlas-tiny/image/"  # Directory containing input images
 depth_dir = "datasets/atlas-tiny/depth/"  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
 loss = "mse"  # Loss function to use ["scale_invariant", "mse"]
-log_dir = "runs/fine_tuning/"+loss  # Directory for TensorBoard logs
-save_path = "fine_tuned/"+loss  # Directory to save the fine-tuned model
+log_dir = "runs/fine_tuning/freeze/"+loss  # Directory for TensorBoard logs
+save_path = "fine_tuned/freeze/"+loss  # Directory to save the fine-tuned model
 
 # Hyperparameters
 batch_size = 4  # Number of samples per batch
@@ -56,12 +56,12 @@ depth_decoder.train()
 
 # Freeze layers (optional)
 # Uncomment and adjust these lines to freeze specific layers in the encoder
-# for param in encoder.parameters():
-#     param.requires_grad = False
+for param in encoder.parameters():
+     param.requires_grad = False
 
 # Optionally, unfreeze specific layers (e.g., the last few layers)
-# for param in encoder.layer4.parameters():
-#     param.requires_grad = True
+for param in encoder.encoder.layer4.parameters():
+     param.requires_grad = True
 
 # Now, only the layers that are not frozen will be trained (e.g., the decoder and unfrozen encoder layers)
 

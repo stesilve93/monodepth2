@@ -7,3 +7,4 @@ kitti_data
 models
 datasets/atlas-tiny
 runs/
+*.png
