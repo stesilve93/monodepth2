@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class DepthDataset(Dataset):
-    def __init__(self, img_dir, depth_dir, img_size=(1024, 320)):
+    def __init__(self, img_dir, depth_dir, img_size=(1024, 320), source="depth"):
         """
         Args:
             img_dir (string): Directory with all the images.
@@ -22,6 +22,7 @@ class DepthDataset(Dataset):
         self.img_dir = img_dir
         self.depth_dir = depth_dir
         self.img_size = img_size
+        self.source = source
         
         # List of all image and depth map filenames
         self.image_files = sorted(os.listdir(img_dir))
@@ -69,7 +70,11 @@ class DepthDataset(Dataset):
 
         # Convert to numpy arrays
         image = np.array(image)
-        depth = np.array(depth).astype(np.uint16) / 65535.0 * 128.0 # Normalize to [0, 1]
+        if self.source == "depth":
+            depth = np.array(depth).astype(np.uint16) / 65535.0 * 128.0 # Normalize to [0, 1]
+        else:
+            depth = np.array(depth).astype(np.uint16) # Normalize to [0, 1]
+
 
         ####
         # plt.subplot(3, 2, 3), plt.imshow(depth, cmap='gray')
@@ -120,7 +125,7 @@ class ScaleInvariantLoss(nn.Module):
 
 # DEBUG
 # img_dir = "../datasets/atlas-tiny/image/"
-# depth_dir = "../datasets/atlas-tiny/depth/"
+# depth_dir = "../datasets/atlas-tiny/dem/"
 # save_path = "fine_tuned_model.pth"
 # model_path = "models/mono_1024x320/"#../pivot/dfvo/model_zoo/depth/nyuv2/supervised/"
 # log_dir = "runs/fine_tuning"  # Directory for TensorBoard logs

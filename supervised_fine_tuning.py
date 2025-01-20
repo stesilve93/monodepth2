@@ -10,24 +10,25 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 
 # Paths
+source_depth = "dem"  # Source of depth maps ["dem", "depth"]
 img_dir = "datasets/atlas-tiny/image/"  # Directory containing input images
-depth_dir = "datasets/atlas-tiny/depth/"  # Directory containing ground truth depth maps
+depth_dir = "datasets/atlas-tiny/"+source_depth  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
 loss = "mse"  # Loss function to use ["scale_invariant", "mse"]
-log_dir = "runs/fine_tuning/freeze/"+loss  # Directory for TensorBoard logs
-save_path = "fine_tuned/freeze/"+loss  # Directory to save the fine-tuned model
+log_dir = "runs/fine_tuning/"+source_depth+"/"+loss  # Directory for TensorBoard logs
+save_path = "fine_tuned/"+source_depth+"/"+loss  # Directory to save the fine-tuned model
 
 # Hyperparameters
 batch_size = 4  # Number of samples per batch
 learning_rate = 1e-5  # Learning rate for the optimizer
 num_epochs = 100  # Number of training epochs
 img_size = (640, 640)  # Image dimensions
-early_stopping_patience = 5  # Stop if no improvement for 5 epochs
+early_stopping_patience = 15  # Stop if no improvement for tot epochs
 best_val_loss = float("inf")
 patience_counter = 0  # Counter for early stopping
 
 # Full dataset (this is the entire dataset, no split yet)
-full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size)
+full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size, source=source_depth)
 
 # Split dataset into 80% train, 10% validation, 10% test
 train_size = int(0.8 * len(full_dataset))
@@ -56,12 +57,12 @@ depth_decoder.train()
 
 # Freeze layers (optional)
 # Uncomment and adjust these lines to freeze specific layers in the encoder
-for param in encoder.parameters():
-     param.requires_grad = False
+# for param in encoder.parameters():
+#      param.requires_grad = False
 
-# Optionally, unfreeze specific layers (e.g., the last few layers)
-for param in encoder.encoder.layer4.parameters():
-     param.requires_grad = True
+# # Optionally, unfreeze specific layers (e.g., the last few layers)
+# for param in encoder.encoder.layer4.parameters():
+#      param.requires_grad = True
 
 # Now, only the layers that are not frozen will be trained (e.g., the decoder and unfrozen encoder layers)
 
