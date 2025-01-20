@@ -48,7 +48,7 @@ encoder = ResnetEncoder(18, pretrained=True)  # Load a ResNet encoder with 18 la
 depth_decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc)  # Load the depth decoder
 
 # Load pre-trained weights
-encoder.load_state_dict(torch.load(model_path + "encoder.pth"), strict=False)
+encoder.load_state_dict(torch.load(model_path + "encoder.pth", weights_only=True), strict=False)
 depth_decoder.load_state_dict(torch.load(model_path + "depth.pth"))
 
 # Set to training mode
