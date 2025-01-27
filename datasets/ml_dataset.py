@@ -5,6 +5,9 @@ import os
 from torchvision import transforms
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import random
+
 
 #DEBUG
 from torch.utils.data import DataLoader
@@ -18,6 +21,8 @@ class DepthDataset(Dataset):
             img_dir (string): Directory with all the images.
             depth_dir (string): Directory with all the depth maps.
             img_size (tuple): Desired image size (width, height) after resizing.
+            source (string): Whether the depth maps are "depth" or "dem" values.
+
         """
         self.img_dir = img_dir
         self.depth_dir = depth_dir
@@ -87,6 +92,17 @@ class DepthDataset(Dataset):
         image = Image.fromarray((image).astype(np.uint8))
         depth = Image.fromarray((depth).astype(np.uint8))
 
+        ### Data augmentation
+        # Random augmentations (consistent for image and depth map)
+        if random.random() > 0.5:  # Horizontal flip
+            image = transforms.functional.hflip(image)
+            depth = transforms.functional.hflip(depth)
+        if random.random() > 0.5:  # Random small rotation
+            angle = random.uniform(-5, 5)
+            image = transforms.functional.rotate(image, angle)
+            depth = transforms.functional.rotate(depth, angle)       
+
+
         # Apply transformations (resize and to tensor)
         image = self.transform_image(image)
         depth = self.transform_depth(depth)
@@ -122,6 +138,115 @@ class ScaleInvariantLoss(nn.Module):
         
         return loss
 
+class EdgeLoss(nn.Module):
+    def __init__(self):
+        super(EdgeLoss, self).__init__()
+        self.sobel_x = nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.sobel_y = nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1, bias=False)
+
+        # Sobel filter kernels
+        sobel_x_kernel = torch.tensor([[-1, 0, 1], 
+                                       [-2, 0, 2], 
+                                       [-1, 0, 1]], dtype=torch.float32).view(1, 1, 3, 3)
+        sobel_y_kernel = torch.tensor([[-1, -2, -1], 
+                                       [ 0,  0,  0], 
+                                       [ 1,  2,  1]], dtype=torch.float32).view(1, 1, 3, 3)
+
+        # Load kernels into the convolution layers
+        self.sobel_x.weight = nn.Parameter(sobel_x_kernel, requires_grad=False)
+        self.sobel_y.weight = nn.Parameter(sobel_y_kernel, requires_grad=False)
+
+    def forward(self, pred_depth, gt_depth):
+        """
+        pred_depth: Predicted depth map (B x 1 x H x W)
+        gt_depth: Ground truth depth map (B x 1 x H x W)
+        """
+        # Move Sobel filters to the same device as input tensors
+        self.sobel_x = self.sobel_x.to(pred_depth.device)
+        self.sobel_y = self.sobel_y.to(pred_depth.device)
+
+        # Compute gradients for predicted depth
+        grad_pred_x = self.sobel_x(pred_depth)
+        grad_pred_y = self.sobel_y(pred_depth)
+
+        # Compute gradients for ground truth depth
+        grad_gt_x = self.sobel_x(gt_depth)
+        grad_gt_y = self.sobel_y(gt_depth)
+
+        # Compute gradient differences (L1 loss on gradients)
+        grad_diff_x = torch.abs(grad_pred_x - grad_gt_x)
+        grad_diff_y = torch.abs(grad_pred_y - grad_gt_y)
+
+        # Combine gradient losses
+        edge_loss = torch.mean(grad_diff_x + grad_diff_y)
+
+        return edge_loss
+
+class SSIMLoss(nn.Module):
+    def __init__(self, window_size=11):
+        super(SSIMLoss, self).__init__()
+        self.window_size = window_size
+        self.c1 = 0.01 ** 2
+        self.c2 = 0.03 ** 2
+
+    def forward(self, pred, target):
+        # Apply a Gaussian filter for local statistics
+        mu_pred = F.avg_pool2d(pred, kernel_size=self.window_size, stride=1, padding=self.window_size // 2)
+        mu_target = F.avg_pool2d(target, kernel_size=self.window_size, stride=1, padding=self.window_size // 2)
+        
+        sigma_pred = F.avg_pool2d(pred ** 2, kernel_size=self.window_size, stride=1, padding=self.window_size // 2) - mu_pred ** 2
+        sigma_target = F.avg_pool2d(target ** 2, kernel_size=self.window_size, stride=1, padding=self.window_size // 2) - mu_target ** 2
+        sigma_pred_target = F.avg_pool2d(pred * target, kernel_size=self.window_size, stride=1, padding=self.window_size // 2) - mu_pred * mu_target
+
+        # Compute SSIM
+        ssim = ((2 * mu_pred * mu_target + self.c1) * (2 * sigma_pred_target + self.c2)) / \
+               ((mu_pred ** 2 + mu_target ** 2 + self.c1) * (sigma_pred + sigma_target + self.c2))
+        
+        # SSIM Loss (1 - SSIM)
+        return 1 - ssim.mean()
+
+class GradientMatchingLoss(nn.Module):
+    def __init__(self):
+        super(GradientMatchingLoss, self).__init__()
+        # Sobel filters for x and y gradients
+        self.sobel_x = nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.sobel_y = nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1, bias=False)
+
+        sobel_x_filter = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32).view(1, 1, 3, 3)
+        sobel_y_filter = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=torch.float32).view(1, 1, 3, 3)
+        
+        self.sobel_x.weight = nn.Parameter(sobel_x_filter, requires_grad=False)
+        self.sobel_y.weight = nn.Parameter(sobel_y_filter, requires_grad=False)
+
+    def forward(self, pred, target):
+        # Move Sobel filters to the same device as input tensors
+        self.sobel_x = self.sobel_x.to(pred.device)
+        self.sobel_y = self.sobel_y.to(pred.device)
+        # Compute gradients
+        grad_pred_x = self.sobel_x(pred)
+        grad_pred_y = self.sobel_y(pred)
+        grad_target_x = self.sobel_x(target)
+        grad_target_y = self.sobel_y(target)
+
+        # Compute gradient difference
+        loss_x = torch.abs(grad_pred_x - grad_target_x).mean()
+        loss_y = torch.abs(grad_pred_y - grad_target_y).mean()
+
+        # Total Gradient Matching Loss
+        return loss_x + loss_y
+
+class CombinedLoss(nn.Module):
+    def __init__(self, lambda_ssim=0.85, lambda_grad=0.15):
+        super(CombinedLoss, self).__init__()
+        self.ssim_loss = SSIMLoss()
+        self.grad_loss = GradientMatchingLoss()
+        self.lambda_ssim = lambda_ssim
+        self.lambda_grad = lambda_grad
+
+    def forward(self, pred, target):
+        ssim_loss = self.ssim_loss(pred, target)
+        grad_loss = self.grad_loss(pred, target)
+        return self.lambda_ssim * ssim_loss + self.lambda_grad * grad_loss
 
 # DEBUG
 # img_dir = "../datasets/atlas-tiny/image/"

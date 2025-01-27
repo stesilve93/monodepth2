@@ -3,14 +3,14 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 from networks import DepthDecoder, ResnetEncoder
 from utils import normalize_image
-from datasets.ml_dataset import DepthDataset, ScaleInvariantLoss
+from datasets.ml_dataset import DepthDataset, ScaleInvariantLoss, EdgeLoss, SSIMLoss, CombinedLoss
 from torchvision import transforms
 import os
 
 from torch.utils.tensorboard import SummaryWriter
 
 # Paths
-source_depth = "dem"  # Source of depth maps ["dem", "depth"]
+source_depth = "filtered_depth"  # Source of depth maps ["dem", "depth"]
 img_dir = "datasets/atlas-tiny/image/"  # Directory containing input images
 depth_dir = "datasets/atlas-tiny/"+source_depth  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
@@ -49,7 +49,7 @@ depth_decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc)  # Load the depth de
 
 # Load pre-trained weights
 encoder.load_state_dict(torch.load(model_path + "encoder.pth", weights_only=True), strict=False)
-depth_decoder.load_state_dict(torch.load(model_path + "depth.pth"))
+depth_decoder.load_state_dict(torch.load(model_path + "depth.pth", weights_only=True))
 
 # Set to training mode
 encoder.train()
@@ -76,11 +76,19 @@ if loss == "scale_invariant":
     loss_fn = ScaleInvariantLoss()
 elif loss == "mse":
     loss_fn = nn.MSELoss()  # Mean Squared Error for depth supervision
+elif loss == "edge":
+    loss_fn = EdgeLoss()  # Edge-aware depth loss
+elif loss == "ssim":
+    loss_fn = SSIMLoss()  # Structural Similarity Index loss
+elif loss == "combined":
+    loss_fn = CombinedLoss()  # Combined loss (scale-invariant + edge-aware)
 
 # Optimizer
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(depth_decoder.parameters()), lr=learning_rate)
 
-# TensorBoard writer
+# Learning Rate Scheduler
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+
 # TensorBoard writer
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
@@ -125,6 +133,11 @@ for epoch in range(num_epochs):
     epoch_loss = 0
     encoder.train()  # Set encoder to training mode
     depth_decoder.train()  # Set decoder to training mode
+
+    # Get current learning rate
+    print("--------------------------------")
+    current_lr = optimizer.param_groups[0]['lr']
+    print(f"Epoch {epoch + 1}/{num_epochs}, Learning Rate: {current_lr}")
 
     for step, batch in enumerate(train_loader):
         images = batch["image"].to(device)
@@ -171,7 +184,7 @@ for epoch in range(num_epochs):
     writer.add_scalar("Test/MAE", test_mae, epoch)
     writer.add_scalar("Test/RMSE", test_rmse, epoch)
 
-    print(f"Test Loss: {test_loss}, Test MAE: {test_mae}, Test RMSE: {test_rmse}")
+    print(f"Epoch {epoch + 1}/{num_epochs}, Test Loss: {test_loss}, Test MAE: {test_mae}, Test RMSE: {test_rmse}")
 
     # Early stopping logic
     if val_loss < best_val_loss:
@@ -184,6 +197,9 @@ for epoch in range(num_epochs):
     if patience_counter >= early_stopping_patience:
         print("Early stopping triggered. Training terminated.")
         break
+
+    # Step the learning rate scheduler
+    scheduler.step()
 
 # Check if the folder exists
 if not os.path.exists(model_path+save_path):
