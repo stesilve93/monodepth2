@@ -10,11 +10,11 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 
 # Paths
-source_depth = "filtered_depth"  # Source of depth maps ["dem", "depth"]
+source_depth = "depth"  # Source of depth maps ["dem", "depth", "filtered_depth"]
 img_dir = "datasets/atlas-tiny/image/"  # Directory containing input images
 depth_dir = "datasets/atlas-tiny/"+source_depth  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
-loss = "mse"  # Loss function to use ["scale_invariant", "mse"]
+loss = "ssim"  # Loss function to use ["scale_invariant", "mse"]
 log_dir = "runs/fine_tuning/"+source_depth+"/"+loss  # Directory for TensorBoard logs
 save_path = "fine_tuned/"+source_depth+"/"+loss  # Directory to save the fine-tuned model
 
