@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import random
+import cv2
 
 
 #DEBUG
@@ -15,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class DepthDataset(Dataset):
-    def __init__(self, img_dir, depth_dir, img_size=(1024, 320), source="depth"):
+    def __init__(self, img_dir, depth_dir, img_size=(1024, 320), source="depth", normalize_maps=False):
         """
         Args:
             img_dir (string): Directory with all the images.
@@ -28,6 +29,7 @@ class DepthDataset(Dataset):
         self.depth_dir = depth_dir
         self.img_size = img_size
         self.source = source
+        self.normalize_maps = normalize_maps
         
         # List of all image and depth map filenames
         self.image_files = sorted(os.listdir(img_dir))
@@ -60,9 +62,9 @@ class DepthDataset(Dataset):
         depth = Image.open(depth_path).convert('I;16')  # Depth maps are single-channel
 
         ####
-        # min_val, max_val = depth.getextrema()
-        # extrema = image.getextrema()
-        # print(min_val, max_val)
+        #min_val, max_val = depth.getextrema()
+        #extrema = image.getextrema()
+        #print(min_val, max_val)
         # extrema = image.getextrema()
         # print(extrema[0][0], extrema[0][1])
         # plt.figure(0, figsize=(18, 5))
@@ -78,8 +80,10 @@ class DepthDataset(Dataset):
         if self.source == "depth":
             depth = np.array(depth).astype(np.uint16) / 65535.0 * 128.0 # Normalize to [0, 1]
         else:
-            depth = np.array(depth).astype(np.uint16) # Normalize to [0, 1]
+            depth = np.array(depth).astype(np.uint16) # Normalize to [0, 1]            
 
+        if self.normalize_maps:
+            depth = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
 
         ####
         # plt.subplot(3, 2, 3), plt.imshow(depth, cmap='gray')
@@ -261,7 +265,7 @@ class CombinedLoss(nn.Module):
 # num_epochs = 10
 
 # # # Dataset and Dataloader (using our custom DepthDataset)
-# dataset = DepthDataset(img_dir, depth_dir, img_size=(640, 640))
+# dataset = DepthDataset(img_dir, depth_dir, img_size=(640, 640), source='dem')
 # dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
 # out = dataset.__getitem__(1)
 

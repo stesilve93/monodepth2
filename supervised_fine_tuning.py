@@ -10,13 +10,16 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 
 # Paths
-source_depth = "depth"  # Source of depth maps ["dem", "depth", "filtered_depth"]
+source_depth = "dem"  # Source of depth maps ["dem", "depth", "filtered_depth"]
+attribute = "normalized"
 img_dir = "datasets/atlas-tiny/image/"  # Directory containing input images
 depth_dir = "datasets/atlas-tiny/"+source_depth  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
-loss = "ssim"  # Loss function to use ["scale_invariant", "mse"]
-log_dir = "runs/fine_tuning/"+source_depth+"/"+loss  # Directory for TensorBoard logs
-save_path = "fine_tuned/"+source_depth+"/"+loss  # Directory to save the fine-tuned model
+loss = "combined"  # Loss function to use ["scale_invariant", "mse"]
+log_dir = "runs/fine_tuning/"+source_depth+"/"+loss+"/"+attribute  # Directory for TensorBoard logs
+save_path = "fine_tuned/"+source_depth+"/"+loss+"/"+attribute  # Directory to save the fine-tuned model
+
+print("Running supervised fine-tuning script for model: ", save_path)
 
 # Hyperparameters
 batch_size = 4  # Number of samples per batch
@@ -28,7 +31,7 @@ best_val_loss = float("inf")
 patience_counter = 0  # Counter for early stopping
 
 # Full dataset (this is the entire dataset, no split yet)
-full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size, source=source_depth)
+full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size, source=source_depth, normalize_maps=True)
 
 # Split dataset into 80% train, 10% validation, 10% test
 train_size = int(0.8 * len(full_dataset))
