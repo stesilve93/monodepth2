@@ -5,27 +5,36 @@ import matplotlib.pyplot as plt
 import open3d as o3d
 from torchvision import transforms
 import networks
+from PIL import Image
 
 # Load models (specify paths to pre-trained MonoDepth2 models)
 MODEL_PATHS = {
-    "Depth": "models/mono_1024x320/fine_tuned/depth/",  # Example path
-    "Depth-Dem Regularized": "models/mono_1024x320/fine_tuned/dem/",
-    "Depth Fourier Filtered": "models/mono_1024x320/fine_tuned/filtered_depth/",
+    "Monodepth2 Original": "models/mono_1024x320/",  # Example path
+    "Depth Fourier Filtered": "models/mono_1024x320/fine_tuned/filtered_depth/combined/normalized/",
+    "Depth-Dem Regularized": "models/mono_1024x320/fine_tuned/dem/combined/normalized/",
 }
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load image
-image_path = "datasets/"  # Specify your image path
-input_image = cv2.imread(image_path)
-input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
+gt = True
+index = 3
+image_path = f"datasets/atlas-tiny/image/opt_000{index}.png"  # Specify your image path
+#image_path = "/home/stesilve/Documents/github/pivot/dfvo/dataset/moonLanding/01_8bit/000001.png"
+input_image = Image.open(image_path).convert('RGB')  # Open as RGB to ensure 3 channels (Monodepth2 expects this)
+
+if gt:
+    depth_path = f"datasets/atlas-tiny/dem/dem_000{index}.png"  # Specify your depth map path
+    depth_gt = Image.open(depth_path).convert('I;16')  # Depth maps are single-channel
+#depth_gt = np.array(depth_gt).astype(np.uint16) / 65535.0 * 128.0 # Normalize to [0, 1]
 
 # Preprocess image
 def preprocess_image(img, width=640, height=640):
-    img = cv2.resize(img, (width, height))
+    #img = cv2.resize(img, (width, height))
     transform = transforms.Compose([
+        transforms.Grayscale(num_output_channels=3),
         transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
+        #transforms.Normalize((0.5,), (0.5,))
     ])
     return transform(img).unsqueeze(0).to(DEVICE)
 
@@ -43,8 +52,8 @@ for name, path in MODEL_PATHS.items():
     encoder = networks.ResnetEncoder(18, False).to(DEVICE)
     depth_decoder = networks.DepthDecoder(num_ch_enc=encoder.num_ch_enc).to(DEVICE)
 
-    encoder.load_state_dict(torch.load(f"{path}/encoder.pth", map_location=DEVICE))
-    depth_decoder.load_state_dict(torch.load(f"{path}/depth.pth", map_location=DEVICE))
+    encoder.load_state_dict(torch.load(f"{path}/encoder.pth", map_location=DEVICE, weights_only=True), strict=False)
+    depth_decoder.load_state_dict(torch.load(f"{path}/depth.pth", map_location=DEVICE, weights_only=True))
 
     encoder.eval()
     depth_decoder.eval()
@@ -58,34 +67,61 @@ def depth_to_disparity(depth_map):
     return 1.0 / (depth_map + 1e-6)  # Avoid division by zero
 
 # Plot results
-fig, axes = plt.subplots(len(depth_maps) + 1, 3, figsize=(12, 8))
+if gt:
+    fig, axes = plt.subplots(len(depth_maps), 4, figsize=(12, 8))
+else:
+    fig, axes = plt.subplots(len(depth_maps), 3, figsize=(12, 8))
 
-axes[0, 0].imshow(input_image)
-axes[0, 0].set_title("Original Image")
-axes[0, 1].axis("off")
-axes[0, 2].axis("off")
 
 for i, (name, depth) in enumerate(depth_maps.items()):
     disparity = depth_to_disparity(depth)
     
-    axes[i + 1, 0].imshow(depth, cmap="plasma")
-    axes[i + 1, 0].set_title(f"{name} Depth Map")
-    
-    axes[i + 1, 1].imshow(disparity, cmap="magma")
-    axes[i + 1, 1].set_title(f"{name} Disparity")
+    if gt:
+        axes[i, 0].imshow(input_image)
+        axes[i, 0].set_title("Original Image")
+        axes[i, 1].axis("off")
+        axes[i, 2].axis("off")
+        axes[i, 3].axis("off")
+        
+        axes[i, 1].imshow(depth_gt, cmap="magma",)# alpha=0.6)
+        #axes[i, 3].imshow(depth, cmap="magma", alpha=0.4)
+        axes[i, 1].set_title(f"Groundtruth")
 
-    axes[i + 1, 2].imshow(input_image, alpha=0.6)
-    axes[i + 1, 2].imshow(disparity, cmap="magma", alpha=0.4)
-    axes[i + 1, 2].set_title(f"Overlay")
+        axes[i, 2].imshow(depth, cmap="plasma")
+        axes[i, 2].set_title(f"{name} Depth Map")
+
+        # axes[i, 1].imshow(disparity, cmap="magma")
+        # axes[i, 1].set_title(f"{name} Disparity")
+
+        axes[i, 3].imshow(input_image, alpha=0.6)
+        axes[i, 3].imshow(depth, cmap="magma", alpha=0.4)
+        axes[i, 3].set_title(f"Overlay")
+    else:
+        axes[i, 0].imshow(input_image)
+        axes[i, 0].set_title("Original Image")
+        axes[i, 1].axis("off")
+        axes[i, 2].axis("off")
+        
+        axes[i, 1].imshow(depth, cmap="plasma")
+        axes[i, 1].set_title(f"{name} Depth Map")
+
+        # axes[i, 1].imshow(disparity, cmap="magma")
+        # axes[i, 1].set_title(f"{name} Disparity")
+
+        axes[i, 2].imshow(input_image, alpha=0.6)
+        axes[i, 2].imshow(depth, cmap="magma", alpha=0.4)
+        axes[i, 2].set_title(f"Overlay")
 
 plt.tight_layout()
 plt.show()
 
 # Convert depth map to point cloud
-def depth_to_point_cloud(depth_map, img):
+def depth_to_point_cloud(depth, img):
+    depth_map = np.asarray(depth)
+
     h, w = depth_map.shape
     fx, fy, cx, cy = w / 2, h / 2, w / 2, h / 2  # Approximate intrinsics
-
+    print(depth_map.max())
     points = []
     colors = []
     for v in range(h):
@@ -104,7 +140,9 @@ def depth_to_point_cloud(depth_map, img):
     return point_cloud
 
 # Generate and visualize 3D point cloud for the first model
-first_depth_map = list(depth_maps.values())[0]
+first_depth_map = list(depth_maps.values())[2]
+input_image = np.asarray(input_image)
+
 point_cloud = depth_to_point_cloud(first_depth_map, input_image)
 
 o3d.visualization.draw_geometries([point_cloud])
