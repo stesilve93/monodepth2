@@ -8,3 +8,5 @@ models
 datasets/atlas-tiny
 runs/
 *.png
+test*
+val*

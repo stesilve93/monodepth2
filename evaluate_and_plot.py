@@ -17,10 +17,11 @@ MODEL_PATHS = {
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load image
-gt = True
-index = 3
+gt = False
+index = 7
 image_path = f"datasets/atlas-tiny/image/opt_000{index}.png"  # Specify your image path
-#image_path = "/home/stesilve/Documents/github/pivot/dfvo/dataset/moonLanding/01_8bit/000001.png"
+#image_path = "/home/stesilve/Documents/github/pivot/dfvo/dataset/moonLanding/01_8bit/000090.png"
+image_path = "/home/stesilve/Documents/github/pivot/dfvo/dataset/southpole/00/054.png"
 input_image = Image.open(image_path).convert('RGB')  # Open as RGB to ensure 3 channels (Monodepth2 expects this)
 
 if gt:
