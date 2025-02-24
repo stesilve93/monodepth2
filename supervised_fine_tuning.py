@@ -12,12 +12,12 @@ from torch.utils.tensorboard import SummaryWriter
 # Paths
 source_depth = "dem"  # Source of depth maps ["dem", "depth", "filtered_depth"]
 attribute = "normalized"
-img_dir = "datasets/atlas-tiny/image/"  # Directory containing input images
-depth_dir = "datasets/atlas-tiny/"+source_depth  # Directory containing ground truth depth maps
+img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/imgs"  # Directory containing input images
+depth_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/depth_maps"  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
 loss = "combined"  # Loss function to use ["scale_invariant", "mse"]
-log_dir = "runs/fine_tuning/"+source_depth+"/"+loss+"/"+attribute  # Directory for TensorBoard logs
-save_path = "fine_tuned/"+source_depth+"/"+loss+"/"+attribute  # Directory to save the fine-tuned model
+log_dir = "runs/train_env/"+source_depth+"/"+loss+"/"+attribute  # Directory for TensorBoard logs
+save_path = "trained_env/"+source_depth+"/"+loss+"/"+attribute  # Directory to save the fine-tuned model
 
 print("Running supervised fine-tuning script for model: ", save_path)
 
@@ -29,6 +29,8 @@ img_size = (640, 640)  # Image dimensions
 early_stopping_patience = 15  # Stop if no improvement for tot epochs
 best_val_loss = float("inf")
 patience_counter = 0  # Counter for early stopping
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Full dataset (this is the entire dataset, no split yet)
 full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size, source=source_depth, normalize_maps=True)
@@ -51,8 +53,8 @@ encoder = ResnetEncoder(18, pretrained=True)  # Load a ResNet encoder with 18 la
 depth_decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc)  # Load the depth decoder
 
 # Load pre-trained weights
-encoder.load_state_dict(torch.load(model_path + "encoder.pth", weights_only=True), strict=False)
-depth_decoder.load_state_dict(torch.load(model_path + "depth.pth", weights_only=True))
+encoder.load_state_dict(torch.load(model_path + "encoder.pth", weights_only=True, map_location=torch.device(device)), strict=False)
+depth_decoder.load_state_dict(torch.load(model_path + "depth.pth", weights_only=True, map_location=torch.device(device)))
 
 # Set to training mode
 encoder.train()
@@ -70,7 +72,7 @@ depth_decoder.train()
 # Now, only the layers that are not frozen will be trained (e.g., the decoder and unfrozen encoder layers)
 
 # Move to GPU if available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 encoder = encoder.to(device)
 depth_decoder = depth_decoder.to(device)
 
