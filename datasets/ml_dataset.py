@@ -44,8 +44,8 @@ class DepthDataset(Dataset):
         ])
         
         self.transform_depth = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),  # Ensure depth map is single channel
-            transforms.Resize(self.img_size),  # Resize depth map to 1024x320
+            #transforms.Grayscale(num_output_channels=1),  # Ensure depth map is single channel
+            #transforms.Resize(self.img_size),  # Resize depth map to 1024x320
             transforms.ToTensor(),  # Convert to tensor
             #transforms.Normalize([0.5], [0.5])  # Normalize for input to Monodepth2 (scaled to [-1, 1])
         ])
@@ -62,9 +62,9 @@ class DepthDataset(Dataset):
         depth = Image.open(depth_path).convert('I;16')  # Depth maps are single-channel
 
         ####
-        #min_val, max_val = depth.getextrema()
+        # min_val, max_val = depth.getextrema()
         #extrema = image.getextrema()
-        #print(min_val, max_val)
+        # print(min_val, max_val)
         # extrema = image.getextrema()
         # print(extrema[0][0], extrema[0][1])
         # plt.figure(0, figsize=(18, 5))
@@ -80,7 +80,7 @@ class DepthDataset(Dataset):
         if self.source == "depth":
             depth = np.array(depth).astype(np.uint16) / 65535.0 * 128.0 # Normalize to [0, 1]
         else:
-            depth = np.array(depth).astype(np.uint16) # Normalize to [0, 1]            
+            depth = np.array(depth).astype(np.uint16) / 65535.0 # Normalize to [0, 1]            
 
         if self.normalize_maps:
             depth = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
@@ -94,22 +94,32 @@ class DepthDataset(Dataset):
 
         # # Convert back to image
         image = Image.fromarray((image).astype(np.uint8))
-        depth = Image.fromarray((depth).astype(np.uint8))
+        #depth = Image.fromarray((depth).astype(np.uint16))
+        depth = depth.astype(np.float32) # The depth is treated as np float 32 to mantain the uint16 precision
+        new_size = (640, 640)  # (width, height) in OpenCV
+        # Resize using OpenCV
+        depth = cv2.resize(depth, new_size, interpolation=cv2.INTER_LINEAR)
 
-        ### Data augmentation
+        
+
+        ### Data augmentation (commented for now)
         # Random augmentations (consistent for image and depth map)
-        if random.random() > 0.5:  # Horizontal flip
-            image = transforms.functional.hflip(image)
-            depth = transforms.functional.hflip(depth)
-        if random.random() > 0.5:  # Random small rotation
-            angle = random.uniform(-5, 5)
-            image = transforms.functional.rotate(image, angle)
-            depth = transforms.functional.rotate(depth, angle)       
+        # if random.random() > 0.5:  # Horizontal flip
+        #     image = transforms.functional.hflip(image)
+        #     depth = transforms.functional.hflip(depth)
+        # if random.random() > 0.5:  # Random small rotation
+        #     angle = random.uniform(-5, 5)
+        #     image = transforms.functional.rotate(image, angle)
+        #     depth = transforms.functional.rotate(depth, angle)       
 
 
         # Apply transformations (resize and to tensor)
         image = self.transform_image(image)
         depth = self.transform_depth(depth)
+
+        # depth_np = np.array(depth)
+        # print(depth_np.dtype)  # Deve essere uint16
+        # print(depth_np.min(), depth_np.max())  # Dovrebbe essere nel range 0-65535
 
         # plt.subplot(3, 2, 5), plt.imshow(depth_t.permute(1, 2, 0),vmin=torch.min(depth_t), vmax=torch.max(depth_t), cmap='gray')
         # plt.title('Tensor show'), plt.colorbar()
@@ -253,8 +263,8 @@ class CombinedLoss(nn.Module):
         return self.lambda_ssim * ssim_loss + self.lambda_grad * grad_loss
 
 # DEBUG
-# img_dir = "../datasets/atlas-tiny/image/"
-# depth_dir = "../datasets/atlas-tiny/dem/"
+# img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/imgs"  # Directory containing input images
+# depth_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/depth_maps" 
 # save_path = "fine_tuned_model.pth"
 # model_path = "models/mono_1024x320/"#../pivot/dfvo/model_zoo/depth/nyuv2/supervised/"
 # log_dir = "runs/fine_tuning"  # Directory for TensorBoard logs

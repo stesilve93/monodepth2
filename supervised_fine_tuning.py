@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Paths
 source_depth = "dem"  # Source of depth maps ["dem", "depth", "filtered_depth"]
-attribute = "normalized"
+attribute = "u16_nonorm"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
 img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/imgs"  # Directory containing input images
 depth_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/depth_maps"  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
@@ -33,7 +33,7 @@ patience_counter = 0  # Counter for early stopping
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Full dataset (this is the entire dataset, no split yet)
-full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size, source=source_depth, normalize_maps=True)
+full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size, source=source_depth, normalize_maps=False)
 
 # Split dataset into 80% train, 10% validation, 10% test
 train_size = int(0.8 * len(full_dataset))
@@ -114,7 +114,9 @@ def evaluate_model(loader, encoder, depth_decoder, loss_fn, device):
             gt_depth = batch["depth"].to(device)
 
             features = encoder(images)
+
             outputs = depth_decoder(features)
+            
             pred_depth = outputs[("disp", 0)]
 
             loss = loss_fn(pred_depth, gt_depth)
