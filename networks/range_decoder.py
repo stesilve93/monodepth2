@@ -27,20 +27,33 @@ class RangeDecoder(nn.Module):
         self.num_ch_dec = np.array([16, 32, 64, 128, 256])
 
         self.sigmoid = nn.Sigmoid()
+        self.linear = None  # Initialize linear layer as None
         self.linear = nn.Linear(512*400, 1024)
-        self.linear2 = nn.Linear(1024, 1)
+        self.linear1 = nn.Linear(2048, 1024)
+        self.linear2 = nn.Linear(1024, 1024)
+        self.linear3 = nn.Linear(1024, 1)
         self.Relu = nn.ReLU()
+
 
     def forward(self, input_features):
         self.outputs = {}
 
-        # decoder
-        x = input_features[-1]
-        x = torch.reshape(x, (4,512*400))
+        x = input_features[-1]               # Deepest encoder feature
+        x = x.view(x.size(0), -1)            # Flatten to (B, C*H*W)
+
+        # Define the first linear layer dynamically
+        if self.linear is None:
+            in_features = x.shape[1]
+            self.linear = nn.Linear(in_features, 2048).to(x.device)
+
         x = self.linear(x)
-        x = self.sigmoid(x)
+        x = self.Relu(x)
+        x = self.linear1(x)
+        x = self.Relu(x)
         x = self.linear2(x)
-        self.outputs = self.Relu(x)
+        x = self.Relu(x)
+        x = self.linear3(x)
+        x = self.Relu(x)
 
-
+        self.outputs = x
         return self.outputs

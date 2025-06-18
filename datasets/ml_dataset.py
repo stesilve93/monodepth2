@@ -262,6 +262,18 @@ class CombinedLoss(nn.Module):
         grad_loss = self.grad_loss(pred, target)
         return self.lambda_ssim * ssim_loss + self.lambda_grad * grad_loss
 
+
+class RelativeMSELoss(nn.Module):
+    def __init__(self, eps=1e-8):
+        super(RelativeMSELoss, self).__init__()
+        self.eps = eps
+
+    def forward(self, predicted, ground_truth):
+        # Prevent division by zero
+        relative_error = (predicted - ground_truth) / (ground_truth + self.eps)
+        loss = torch.mean(relative_error ** 2)
+        return loss
+
 # DEBUG
 # img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/imgs"  # Directory containing input images
 # depth_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/depth_maps" 

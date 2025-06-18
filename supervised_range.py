@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 from networks import DepthDecoder, ResnetEncoder, RangeDecoder
 from utils import normalize_image
-from datasets.ml_dataset import DepthDataset, ScaleInvariantLoss, EdgeLoss, SSIMLoss, CombinedLoss
+from datasets.ml_dataset import DepthDataset, ScaleInvariantLoss, EdgeLoss, SSIMLoss, CombinedLoss, RelativeMSELoss
 from datasets.range_dataset import RangeDataset
 from torchvision import transforms
 import os
@@ -12,12 +12,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Paths
 source_depth = "dem"  # Source of depth maps ["dem", "depth", "filtered_depth"]
-attribute = "range_test"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
-img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_generic_00/imgs_raw"  # Directory containing input images
+attribute = "range_normalized"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
+img_dir = "/users/mbussolino/Documents/Datasets/dataset_depth_generic_00/imgs"  # Directory containing input images
 depth_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_generic_00/depth_maps/depth_png_relative"  # Directory containing ground truth depth maps
-labels_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_generic_00/database_info/labels.json"  # Directory containing labels (if any)
+labels_dir = "/users/mbussolino/Documents/Datasets/dataset_depth_generic_00/labels.json"  # Directory containing labels (if any)
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
-loss = "mse"  # Loss function to use ["scale_invariant", "mse"]
+loss = "rel_mse"  # Loss function to use ["scale_invariant", "mse"]
 log_dir = "runs/train_env/"+source_depth+"/"+loss+"/"+attribute  # Directory for TensorBoard logs
 save_path = "trained_env/"+source_depth+"/"+loss+"/"+attribute  # Directory to save the fine-tuned model
 
@@ -25,7 +25,9 @@ print("Running supervised fine-tuning script for model: ", save_path)
 
 # Hyperparameters
 batch_size = 4  # Number of samples per batch
-learning_rate = 1e-5  # Learning rate for the optimizer
+#learning_rate = 1e-5  # Learning rate for the optimizer
+encoder_lr = 1e-5  # Learning rate for the encoder
+decoder_lr = 1e-4  # Learning rate for the decoder
 num_epochs = 100  # Number of training epochs
 img_size = (640, 640)  # Image dimensions
 early_stopping_patience = 15  # Stop if no improvement for tot epochs
@@ -74,9 +76,18 @@ elif loss == "ssim":
     loss_fn = SSIMLoss()  # Structural Similarity Index loss
 elif loss == "combined":
     loss_fn = CombinedLoss()  # Combined loss (scale-invariant + edge-aware)
+elif loss == "rel_mse":
+    loss_fn = RelativeMSELoss()  # Relative Mean Squared Error loss
+
+
 
 # Optimizer
-optimizer = torch.optim.Adam(list(encoder.parameters()) + list(range_decoder.parameters()), lr=learning_rate)
+#optimizer = torch.optim.Adam(list(encoder.parameters()) + list(range_decoder.parameters()), lr=learning_rate)
+optimizer = torch.optim.Adam([
+    {"params": encoder.parameters(), "lr": encoder_lr},
+    {"params": range_decoder.parameters(), "lr": decoder_lr}
+])
+
 
 # Learning Rate Scheduler
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
@@ -101,7 +112,7 @@ def evaluate_model(loader, encoder, range_decoder, loss_fn, device):
             gt_range = batch["distance"].to(device)
 
             features = encoder(images)
-            print("Features shape: ", [f.shape for f in features])
+            #print("Features shape: ", [f.shape for f in features])
 
             outputs = range_decoder(features)
             
@@ -109,6 +120,12 @@ def evaluate_model(loader, encoder, range_decoder, loss_fn, device):
 
             gt_range = gt_range.unsqueeze(1).float()  # To make it shape [4, 1]
             loss = loss_fn(pred_range, gt_range)
+            #loss = torch.mean(torch.abs((pred_range - gt_range) / gt_range))
+
+            #unnorm = gt_range * (200 - 10) + 10
+            print("Ground truth range: ", gt_range.tolist())
+            #unnorm = pred_range * (200 - 10) + 10
+            print("Predicted range: ", pred_range.tolist())
             total_loss += loss.item()
 
             mae = torch.mean(torch.abs(pred_range - gt_range))
@@ -149,6 +166,7 @@ for epoch in range(num_epochs):
         # Compute supervised loss
         gt_range = gt_range.unsqueeze(1).float()  # To make it shape [4, 1]
         loss = loss_fn(pred_range, gt_range)
+        #loss = torch.mean(torch.abs((pred_range - gt_range) / gt_range))
 
         # Backpropagation
         optimizer.zero_grad()
