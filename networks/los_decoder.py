@@ -14,9 +14,9 @@ from collections import OrderedDict
 from layers import *
 
 
-class RangeDecoder(nn.Module):
+class LOSDecoder(nn.Module):
     def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True):
-        super(RangeDecoder, self).__init__()
+        super(LOSDecoder, self).__init__()
 
         self.num_output_channels = num_output_channels
         self.use_skips = use_skips
@@ -31,13 +31,16 @@ class RangeDecoder(nn.Module):
         #self.linear = nn.Linear(524288, 1024)
         self.linear1 = nn.Linear(2048, 1024)
         self.linear2 = nn.Linear(1024, 1024)
-        self.linear3 = nn.Linear(1024, 1)
+        self.linear3 = nn.Linear(1024, 3)
         self.Relu = nn.ReLU()
+        self.softmax = nn.Softmax()
 
 
     def forward(self, input_features):
         self.outputs = {}
-
+            # Print all shapes in input_features
+        # for i, feat in enumerate(input_features):
+        #     print(f"Shape of input_features[{i}]: {feat.shape}")
         x = input_features[-1]               # Deepest encoder feature
         x = x.view(x.size(0), -1)            # Flatten to (B, C*H*W)
 

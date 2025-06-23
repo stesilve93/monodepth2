@@ -17,7 +17,7 @@ import numpy as np
 import json
 import pandas as pd
 
-class RangeDataset(Dataset):
+class LOSDataset(Dataset):
     def __init__(self, database_dir, img_size=(1024, 320), source="depth", normalize_maps=False):
         """
         Args:
@@ -46,7 +46,7 @@ class RangeDataset(Dataset):
         # Transformation for the images and depth maps (resize, to tensor, normalize)
         self.transform_image = transforms.Compose([
             transforms.Grayscale(num_output_channels=3),  # Ensure it's 3 channel (monodepth wants this)
-            transforms.Resize((512,512)),  # Resize image to 1024x320
+            transforms.Resize((1024,1024)),  # Resize image to 1024x320
             transforms.ToTensor(),  # Convert image to tensor
             #transforms.Normalize([0.5], [0.5])  # Normalize for input to Monodepth2 (scaled to [-1, 1])
         ])
@@ -65,8 +65,10 @@ class RangeDataset(Dataset):
 
         cam_position = self.labels.iloc[idx]['camera_eci_position']
         tar_position = self.labels.iloc[idx]['target_eci_position']
-        distance = np.linalg.norm(np.array(cam_position) - np.array(tar_position))
-        distance = torch.tensor(distance)
+        distance = np.linalg.norm(np.array(cam_position) - np.array(tar_position))/1000
+        u = self.labels.iloc[idx]['target-los'][0]
+        v = self.labels.iloc[idx]['target-los'][1]
+        los_range = torch.tensor(np.array([u,v,distance]))
         #distance = torch.tensor(self.labels.iloc[idx]['target_distance'])  # Get the distance value from the labels DataFrame
 
         # Load the image and depth map
@@ -144,7 +146,7 @@ class RangeDataset(Dataset):
 
         # plt.show()
         # Return a dictionary with image and depth tensor
-        return {'image': image, 'distance': distance}
+        return {'image': image, 'los-range': los_range}
 
 class ScaleInvariantLoss(nn.Module):
     def __init__(self):
@@ -277,6 +279,39 @@ class CombinedLoss(nn.Module):
         ssim_loss = self.ssim_loss(pred, target)
         grad_loss = self.grad_loss(pred, target)
         return self.lambda_ssim * ssim_loss + self.lambda_grad * grad_loss
+    
+class RelativeMSELoss(nn.Module):
+    def __init__(self, eps=1e-8):
+        super(RelativeMSELoss, self).__init__()
+        self.eps = eps
+
+    def forward(self, predicted, ground_truth):
+        # Prevent division by zero
+        relative_error = (predicted - ground_truth) / (ground_truth + self.eps)
+        loss = torch.mean(relative_error ** 2)
+        return loss
+    
+class LOSRangeLoss(nn.Module):
+    def __init__(self,los_gain = 1e4, eps=1e-8):
+        super(LOSRangeLoss, self).__init__()
+        self.eps = eps
+        self.los_gain = los_gain
+
+    def forward(self, predicted, ground_truth):
+        # Split components
+        pred_u, pred_v, pred_r = predicted[:, 0], predicted[:, 1], predicted[:, 2]
+        gt_u, gt_v, gt_r = ground_truth[:, 0], ground_truth[:, 1], ground_truth[:, 2]
+
+        # Relative squared error for range
+        relative_range_error = ((pred_r - gt_r) / (gt_r + self.eps)) ** 2
+
+        # MSE for u and v
+        los_error = (pred_u - gt_u) ** 2 + (pred_v - gt_v) ** 2
+
+        # Total loss
+        loss = torch.mean(relative_range_error + self.los_gain * los_error)
+
+        return loss
 
 # DEBUG
 # img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/imgs"  # Directory containing input images
