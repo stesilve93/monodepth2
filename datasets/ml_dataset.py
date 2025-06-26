@@ -96,7 +96,7 @@ class DepthDataset(Dataset):
         image = Image.fromarray((image).astype(np.uint8))
         #depth = Image.fromarray((depth).astype(np.uint16))
         depth = depth.astype(np.float32) # The depth is treated as np float 32 to mantain the uint16 precision
-        new_size = (640, 640)  # (width, height) in OpenCV
+        new_size = (320, 1024)  # (width, height) in OpenCV
         # Resize using OpenCV
         depth = cv2.resize(depth, new_size, interpolation=cv2.INTER_LINEAR)
 

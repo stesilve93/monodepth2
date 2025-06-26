@@ -10,10 +10,10 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 
 # Paths
-source_depth = "dem"  # Source of depth maps ["dem", "depth", "filtered_depth"]
-attribute = "u16_nonorm"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
-img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/imgs"  # Directory containing input images
-depth_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/depth_maps"  # Directory containing ground truth depth maps
+source_depth = "sat"  # Source of depth maps ["dem", "depth", "filtered_depth"]
+attribute = "u16_mid-range"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
+img_dir = "/home/massi/Documents/datasets/mid-range/images_bw"  # Directory containing input images
+depth_dir = "/home/massi/Documents/datasets/mid-range/depths/png_files"  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
 loss = "combined"  # Loss function to use ["scale_invariant", "mse"]
 log_dir = "runs/train_env/"+source_depth+"/"+loss+"/"+attribute  # Directory for TensorBoard logs
@@ -24,8 +24,8 @@ print("Running supervised fine-tuning script for model: ", save_path)
 # Hyperparameters
 batch_size = 4  # Number of samples per batch
 learning_rate = 1e-5  # Learning rate for the optimizer
-num_epochs = 100  # Number of training epochs
-img_size = (640, 640)  # Image dimensions
+num_epochs = 200  # Number of training epochs
+img_size = (1024, 320)  # Image dimensions
 early_stopping_patience = 15  # Stop if no improvement for tot epochs
 best_val_loss = float("inf")
 patience_counter = 0  # Counter for early stopping
@@ -92,7 +92,7 @@ elif loss == "combined":
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(depth_decoder.parameters()), lr=learning_rate)
 
 # Learning Rate Scheduler
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=90, gamma=0.5)
 
 # TensorBoard writer
 if not os.path.exists(log_dir):
