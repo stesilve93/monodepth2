@@ -8,16 +8,18 @@ from datasets.range_dataset import RangeDataset
 from datasets.los_dataset import LOSDataset, LOSRangeLoss
 from torchvision import transforms
 import os
-
+from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 
+# Get current time as a string
+time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 # Paths
-source_depth = "dem"  # Source of depth maps ["dem", "depth", "filtered_depth"]
-attribute = "sf_test"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
+source_depth = "sat"  # Source of depth maps ["dem", "depth", "filtered_depth"]
+attribute = "sf_test_pool2D"+time_str  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
 #img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_generic_00/imgs_raw"  # Directory containing input images
 #depth_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_generic_00/depth_maps/depth_png_relative"  # Directory containing ground truth depth maps
 #labels_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_generic_00/database_info/labels.json"  # Directory containing labels (if any)
-database_dir = "/home/massi/Documents/datasets/mid-range"
+database_dir = "/home/massi/Documents/datasets/joined"
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
 loss = "los-range"  # Loss function to use ["scale_invariant", "mse"]
 log_dir = "runs/train_env/"+source_depth+"/"+loss+"/"+attribute  # Directory for TensorBoard logs
@@ -31,8 +33,8 @@ batch_size = 8  # Number of samples per batch
 encoder_lr = 1e-5  # Learning rate for the encoder
 decoder_lr = 1e-5  # Learning rate for the decoder
 num_epochs = 100  # Number of training epochs
-img_size = (640, 640)  # Image dimensions
-early_stopping_patience = 15  # Stop if no improvement for tot epochs
+img_size = (1024, 320)  # Image dimensions
+early_stopping_patience = 30  # Stop if no improvement for tot epochs
 best_val_loss = float("inf")
 patience_counter = 0  # Counter for early stopping
 

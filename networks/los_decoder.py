@@ -42,7 +42,15 @@ class LOSDecoder(nn.Module):
         # for i, feat in enumerate(input_features):
         #     print(f"Shape of input_features[{i}]: {feat.shape}")
         x = input_features[-1]               # Deepest encoder feature
+
+        # Apply average pooling to reduce spatial resolution
+        pool = nn.AvgPool2d(kernel_size=3, stride=3)
+        x = pool(x)  # Now (B, C, H/2, W/2)
+
         x = x.view(x.size(0), -1)            # Flatten to (B, C*H*W)
+
+        # Print the number of nodes (features) after flattening
+        #print(f"Linearized input size: {x.shape[1]} nodes")
 
         # Define the first linear layer dynamically
         if self.linear is None:

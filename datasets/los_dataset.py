@@ -46,7 +46,7 @@ class LOSDataset(Dataset):
         # Transformation for the images and depth maps (resize, to tensor, normalize)
         self.transform_image = transforms.Compose([
             transforms.Grayscale(num_output_channels=3),  # Ensure it's 3 channel (monodepth wants this)
-            transforms.Resize((1024,1024)),  # Resize image to 1024x320
+            transforms.Resize((1024,320)),  # Resize image to 1024x320
             transforms.ToTensor(),  # Convert image to tensor
             #transforms.Normalize([0.5], [0.5])  # Normalize for input to Monodepth2 (scaled to [-1, 1])
         ])
@@ -292,7 +292,7 @@ class RelativeMSELoss(nn.Module):
         return loss
     
 class LOSRangeLoss(nn.Module):
-    def __init__(self,los_gain = 1e4, eps=1e-8):
+    def __init__(self,los_gain = 500, eps=1e-8):
         super(LOSRangeLoss, self).__init__()
         self.eps = eps
         self.los_gain = los_gain
