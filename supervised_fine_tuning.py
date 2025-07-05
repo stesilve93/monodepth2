@@ -3,7 +3,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 from networks import DepthDecoder, ResnetEncoder
 from utils import normalize_image
-from datasets.ml_dataset import DepthDataset, ScaleInvariantLoss, EdgeLoss, SSIMLoss, CombinedLoss
+from datasets.ml_dataset import DepthDataset, ScaleInvariantLoss, EdgeLoss, SSIMLoss, CombinedLoss, MaskLoss
+from datasets.los_dataset import LOSDataset
 from torchvision import transforms
 import os
 
@@ -11,21 +12,21 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Paths
 source_depth = "sat"  # Source of depth maps ["dem", "depth", "filtered_depth"]
-attribute = "u16_mid-range"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
-img_dir = "/home/massi/Documents/datasets/mid-range/images_bw"  # Directory containing input images
-depth_dir = "/home/massi/Documents/datasets/mid-range/depths/png_files"  # Directory containing ground truth depth maps
+attribute = "test"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
+img_dir = "/home/massi/Documents/datasets/close-range/images_bw"  # Directory containing input images
+depth_dir = "/home/massi/Documents/datasets/close-range/depths/png_files"  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
-loss = "combined"  # Loss function to use ["scale_invariant", "mse"]
+loss = "mask"  # Loss function to use ["scale_invariant", "mse"]
 log_dir = "runs/train_env/"+source_depth+"/"+loss+"/"+attribute  # Directory for TensorBoard logs
 save_path = "trained_env/"+source_depth+"/"+loss+"/"+attribute  # Directory to save the fine-tuned model
 
 print("Running supervised fine-tuning script for model: ", save_path)
 
 # Hyperparameters
-batch_size = 4  # Number of samples per batch
+batch_size = 8  # Number of samples per batch
 learning_rate = 1e-5  # Learning rate for the optimizer
 num_epochs = 200  # Number of training epochs
-img_size = (1024, 320)  # Image dimensions
+img_size = (320, 1024)  # Image dimensions
 early_stopping_patience = 15  # Stop if no improvement for tot epochs
 best_val_loss = float("inf")
 patience_counter = 0  # Counter for early stopping
@@ -51,6 +52,7 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 # Load Monodepth2 Model
 encoder = ResnetEncoder(18, pretrained=True)  # Load a ResNet encoder with 18 layers
 depth_decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc)  # Load the depth decoder
+
 
 # Load pre-trained weights
 encoder.load_state_dict(torch.load(model_path + "encoder.pth", weights_only=True, map_location=torch.device(device)), strict=False)
@@ -87,12 +89,14 @@ elif loss == "ssim":
     loss_fn = SSIMLoss()  # Structural Similarity Index loss
 elif loss == "combined":
     loss_fn = CombinedLoss()  # Combined loss (scale-invariant + edge-aware)
+elif loss == "mask":
+    loss_fn = MaskLoss()
 
 # Optimizer
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(depth_decoder.parameters()), lr=learning_rate)
 
 # Learning Rate Scheduler
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=90, gamma=0.5)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=60, gamma=0.5)
 
 # TensorBoard writer
 if not os.path.exists(log_dir):
@@ -133,7 +137,7 @@ def evaluate_model(loader, encoder, depth_decoder, loss_fn, device):
     avg_mae = total_mae / count
     avg_rmse = total_rmse / count
 
-    return avg_loss, avg_mae, avg_rmse
+    return avg_loss, avg_mae, avg_rmse, images, pred_depth, gt_depth
 
 # Training loop
 for epoch in range(num_epochs):
@@ -178,18 +182,24 @@ for epoch in range(num_epochs):
             writer.add_images("Train/Ground Truth Depth", gt_depth, epoch)
 
     # Validation
-    val_loss, val_mae, val_rmse = evaluate_model(val_loader, encoder, depth_decoder, loss_fn, device)
+    val_loss, val_mae, val_rmse, images, pred_depth, gt_depth = evaluate_model(val_loader, encoder, depth_decoder, loss_fn, device)
     writer.add_scalar("Validation/Loss", val_loss, epoch)
     writer.add_scalar("Validation/MAE", val_mae, epoch)
     writer.add_scalar("Validation/RMSE", val_rmse, epoch)
+    writer.add_images("Validation/Input Images", images, epoch)
+    writer.add_images("Validation/Predicted Depth", pred_depth, epoch)
+    writer.add_images("Validation/Ground Truth Depth", gt_depth, epoch)
 
     print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {epoch_loss / len(train_loader)}, Val Loss: {val_loss}")
 
     # Test evaluation
-    test_loss, test_mae, test_rmse = evaluate_model(test_loader, encoder, depth_decoder, loss_fn, device)
+    test_loss, test_mae, test_rmse, images, pred_depth, gt_depth = evaluate_model(test_loader, encoder, depth_decoder, loss_fn, device)
     writer.add_scalar("Test/Loss", test_loss, epoch)
     writer.add_scalar("Test/MAE", test_mae, epoch)
     writer.add_scalar("Test/RMSE", test_rmse, epoch)
+    writer.add_images("Test/Input Images", images, epoch)
+    writer.add_images("Test/Predicted Depth", pred_depth, epoch)
+    writer.add_images("Test/Ground Truth Depth", gt_depth, epoch)
 
     print(f"Epoch {epoch + 1}/{num_epochs}, Test Loss: {test_loss}, Test MAE: {test_mae}, Test RMSE: {test_rmse}")
 

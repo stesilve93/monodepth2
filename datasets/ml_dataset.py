@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class DepthDataset(Dataset):
-    def __init__(self, img_dir, depth_dir, img_size=(1024, 320), source="depth", normalize_maps=False):
+    def __init__(self, img_dir, depth_dir, img_size=(320, 1024), source="depth", normalize_maps=False):
         """
         Args:
             img_dir (string): Directory with all the images.
@@ -61,19 +61,6 @@ class DepthDataset(Dataset):
         image = Image.open(img_path).convert('RGB')  # Open as RGB to ensure 3 channels (Monodepth2 expects this)
         depth = Image.open(depth_path).convert('I;16')  # Depth maps are single-channel
 
-        ####
-        # min_val, max_val = depth.getextrema()
-        #extrema = image.getextrema()
-        # print(min_val, max_val)
-        # extrema = image.getextrema()
-        # print(extrema[0][0], extrema[0][1])
-        # plt.figure(0, figsize=(18, 5))
-        # min_val, max_val = depth.getextrema()
-        # plt.subplot(3, 2, 1), plt.imshow(depth, vmin=min_val, vmax=max_val, cmap='gray')
-        # plt.title('Pillow image, original mode I'), plt.colorbar()
-        # plt.subplot(3, 2, 2), plt.imshow(image, vmin=extrema[0][0], vmax=extrema[0][1], cmap='gray')
-        # plt.title('Pillow image, original mode I'), plt.colorbar()
-        #####
 
         # Convert to numpy arrays
         image = np.array(image)
@@ -85,49 +72,19 @@ class DepthDataset(Dataset):
         if self.normalize_maps:
             depth = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
 
-        ####
-        # plt.subplot(3, 2, 3), plt.imshow(depth, cmap='gray')
-        # plt.title('Numpy image, original mode I'), plt.colorbar()
-        # plt.subplot(3, 2, 4), plt.imshow(image, cmap='gray')
-        # plt.title('Numpy image, original mode I'), plt.colorbar()
-        ####
 
         # # Convert back to image
         image = Image.fromarray((image).astype(np.uint8))
         #depth = Image.fromarray((depth).astype(np.uint16))
         depth = depth.astype(np.float32) # The depth is treated as np float 32 to mantain the uint16 precision
-        new_size = (320, 1024)  # (width, height) in OpenCV
+        new_size = (1024, 320)  # (width, height) in OpenCV
         # Resize using OpenCV
         depth = cv2.resize(depth, new_size, interpolation=cv2.INTER_LINEAR)
-
-        
-
-        ### Data augmentation (commented for now)
-        # Random augmentations (consistent for image and depth map)
-        # if random.random() > 0.5:  # Horizontal flip
-        #     image = transforms.functional.hflip(image)
-        #     depth = transforms.functional.hflip(depth)
-        # if random.random() > 0.5:  # Random small rotation
-        #     angle = random.uniform(-5, 5)
-        #     image = transforms.functional.rotate(image, angle)
-        #     depth = transforms.functional.rotate(depth, angle)       
-
 
         # Apply transformations (resize and to tensor)
         image = self.transform_image(image)
         depth = self.transform_depth(depth)
 
-        # depth_np = np.array(depth)
-        # print(depth_np.dtype)  # Deve essere uint16
-        # print(depth_np.min(), depth_np.max())  # Dovrebbe essere nel range 0-65535
-
-        # plt.subplot(3, 2, 5), plt.imshow(depth_t.permute(1, 2, 0),vmin=torch.min(depth_t), vmax=torch.max(depth_t), cmap='gray')
-        # plt.title('Tensor show'), plt.colorbar()
-        # plt.subplot(3, 2, 6), plt.imshow(image_t.permute(1, 2, 0),vmin=torch.min(image_t), vmax=torch.max(image_t), cmap='gray')
-        # plt.title('Tensor show'), plt.colorbar()
-
-        # plt.show()
-        # Return a dictionary with image and depth tensor
         return {'image': image, 'depth': depth}
 
 class ScaleInvariantLoss(nn.Module):
@@ -261,6 +218,36 @@ class CombinedLoss(nn.Module):
         ssim_loss = self.ssim_loss(pred, target)
         grad_loss = self.grad_loss(pred, target)
         return self.lambda_ssim * ssim_loss + self.lambda_grad * grad_loss
+    
+class MaskLoss(nn.Module):
+    def __init__(self, alpha = 20):
+        super(MaskLoss, self).__init__()
+
+        self.mse = nn.MSELoss() 
+        self.combined = CombinedLoss()
+        self.alpha = alpha
+
+    def forward(self, pred, target):
+        
+        comb_loss = self.combined(pred, target)
+
+        mask = target < 1  # Create boolean mask of valid pixels
+        pred_masked = pred[mask]
+        target_masked = target[mask]
+
+        if target_masked.numel() == 0:
+            return comb_loss  # Avoid division by zero if no valid pixels
+
+        mse_loss = self.mse(pred_masked, target_masked)
+
+        loss = comb_loss + self.alpha*mse_loss
+
+        # print('Combined: ')
+        # print(comb_loss)
+        # print('Mse: ')
+        # print(mse_loss)
+
+        return loss
 
 # DEBUG
 # img_dir = "/home/mbussolino/Documents/Datasets/dataset_depth_00/imgs"  # Directory containing input images
