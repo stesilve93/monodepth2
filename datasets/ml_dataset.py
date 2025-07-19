@@ -220,7 +220,7 @@ class CombinedLoss(nn.Module):
         return self.lambda_ssim * ssim_loss + self.lambda_grad * grad_loss
     
 class MaskLoss(nn.Module):
-    def __init__(self, alpha = 20):
+    def __init__(self, alpha = 2e3):
         super(MaskLoss, self).__init__()
 
         self.mse = nn.MSELoss() 
@@ -231,16 +231,18 @@ class MaskLoss(nn.Module):
         
         comb_loss = self.combined(pred, target)
 
-        mask = target < 1  # Create boolean mask of valid pixels
-        pred_masked = pred[mask]
-        target_masked = target[mask]
+        # mask = target < 1  # Create boolean mask of valid pixels
+        # pred_masked = pred[mask]
+        # target_masked = target[mask]
 
-        if target_masked.numel() == 0:
-            return comb_loss  # Avoid division by zero if no valid pixels
+        # if target_masked.numel() == 0:
+        #     return comb_loss  # Avoid division by zero if no valid pixels
 
-        mse_loss = self.mse(pred_masked, target_masked)
+        # mse_loss = self.mse(pred_masked, target_masked)
 
-        loss = comb_loss + self.alpha*mse_loss
+        weights = 1.2 - target
+        mse_loss = torch.mean(weights * (pred - target)**2)
+        loss = self.alpha*mse_loss
 
         # print('Combined: ')
         # print(comb_loss)

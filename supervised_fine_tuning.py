@@ -3,8 +3,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 from networks import DepthDecoder, ResnetEncoder
 from utils import normalize_image
-from datasets.ml_dataset import DepthDataset, ScaleInvariantLoss, EdgeLoss, SSIMLoss, CombinedLoss, MaskLoss
-from datasets.los_dataset import LOSDataset
+from datasets.cropped_dataset import CroppedDataset, ScaleInvariantLoss, EdgeLoss, SSIMLoss, CombinedLoss, MaskLoss, EdgeguidedRankingLoss
+#from datasets.los_dataset import LOSDataset
 from torchvision import transforms
 import os
 
@@ -12,11 +12,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Paths
 source_depth = "sat"  # Source of depth maps ["dem", "depth", "filtered_depth"]
-attribute = "test"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
-img_dir = "/home/massi/Documents/datasets/close-range/images_bw"  # Directory containing input images
-depth_dir = "/home/massi/Documents/datasets/close-range/depths/png_files"  # Directory containing ground truth depth maps
+attribute = "cropped-augmented"  # Attribute of the dataset ["u16", "u8", "u16_nonorm"]
+img_dir = "/home/massi/Documents/datasets/close-range-augmented/images_bw"  # Directory containing input images
+depth_dir = "/home/massi/Documents/datasets/close-range-augmented/depths/png_files"  # Directory containing ground truth depth maps
 model_path = "models/mono_1024x320/"  # Path to pre-trained model weights
-loss = "mask"  # Loss function to use ["scale_invariant", "mse"]
+loss = "combined"  # Loss function to use ["scale_invariant", "mse"]
 log_dir = "runs/train_env/"+source_depth+"/"+loss+"/"+attribute  # Directory for TensorBoard logs
 save_path = "trained_env/"+source_depth+"/"+loss+"/"+attribute  # Directory to save the fine-tuned model
 
@@ -34,7 +34,7 @@ patience_counter = 0  # Counter for early stopping
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Full dataset (this is the entire dataset, no split yet)
-full_dataset = DepthDataset(img_dir, depth_dir, img_size=img_size, source=source_depth, normalize_maps=False)
+full_dataset = CroppedDataset(img_dir, depth_dir, img_size=img_size, source=source_depth, normalize_maps=True)
 
 # Split dataset into 80% train, 10% validation, 10% test
 train_size = int(0.8 * len(full_dataset))
@@ -78,6 +78,7 @@ depth_decoder.train()
 encoder = encoder.to(device)
 depth_decoder = depth_decoder.to(device)
 
+loss_fn_str = loss
 # Loss function
 if loss == "scale_invariant":
     loss_fn = ScaleInvariantLoss()
@@ -91,6 +92,8 @@ elif loss == "combined":
     loss_fn = CombinedLoss()  # Combined loss (scale-invariant + edge-aware)
 elif loss == "mask":
     loss_fn = MaskLoss()
+elif loss == "ranking":
+    loss_fn = EdgeguidedRankingLoss()
 
 # Optimizer
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(depth_decoder.parameters()), lr=learning_rate)
@@ -123,7 +126,10 @@ def evaluate_model(loader, encoder, depth_decoder, loss_fn, device):
             
             pred_depth = outputs[("disp", 0)]
 
-            loss = loss_fn(pred_depth, gt_depth)
+            if loss_fn_str == "ranking":
+                loss = loss_fn(pred_depth, gt_depth, images)
+            else: 
+                loss = loss_fn(pred_depth, gt_depth)
             total_loss += loss.item()
 
             mae = torch.mean(torch.abs(pred_depth - gt_depth))
@@ -162,7 +168,10 @@ for epoch in range(num_epochs):
         pred_depth = outputs[("disp", 0)]  # Output at the highest resolution
 
         # Compute supervised loss
-        loss = loss_fn(pred_depth, gt_depth)
+        if loss_fn_str == "ranking":
+            loss = loss_fn(pred_depth, gt_depth, images)
+        else: 
+            loss = loss_fn(pred_depth, gt_depth)
 
         # Backpropagation
         optimizer.zero_grad()
@@ -178,7 +187,11 @@ for epoch in range(num_epochs):
         # Log images every 100 steps
         if step % 100 == 0:
             writer.add_images("Train/Input Images", images, epoch)
-            writer.add_images("Train/Predicted Depth", pred_depth, epoch)
+            # pred_depth: shape [B, 1, H, W]
+            pred_depth_min = pred_depth.amin(dim=[2, 3], keepdim=True)
+            pred_depth_max = pred_depth.amax(dim=[2, 3], keepdim=True)
+            normalized_depth = (pred_depth - pred_depth_min) / (pred_depth_max - pred_depth_min + 1e-8)  # avoid div by zero
+            writer.add_images("Train/Predicted Depth", normalized_depth, epoch)
             writer.add_images("Train/Ground Truth Depth", gt_depth, epoch)
 
     # Validation
@@ -187,7 +200,11 @@ for epoch in range(num_epochs):
     writer.add_scalar("Validation/MAE", val_mae, epoch)
     writer.add_scalar("Validation/RMSE", val_rmse, epoch)
     writer.add_images("Validation/Input Images", images, epoch)
-    writer.add_images("Validation/Predicted Depth", pred_depth, epoch)
+    # pred_depth: shape [B, 1, H, W]
+    pred_depth_min = pred_depth.amin(dim=[2, 3], keepdim=True)
+    pred_depth_max = pred_depth.amax(dim=[2, 3], keepdim=True)
+    normalized_depth = (pred_depth - pred_depth_min) / (pred_depth_max - pred_depth_min + 1e-8)  # avoid div by zero
+    writer.add_images("Validation/Predicted Depth", normalized_depth, epoch)
     writer.add_images("Validation/Ground Truth Depth", gt_depth, epoch)
 
     print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {epoch_loss / len(train_loader)}, Val Loss: {val_loss}")
