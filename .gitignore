@@ -10,3 +10,4 @@ runs/
 *.png
 test*
 val*
+yolo-weights/

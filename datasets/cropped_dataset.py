@@ -10,15 +10,17 @@ import random
 import cv2
 import json
 import pandas as pd
-
+from ultralytics import YOLO
 
 #DEBUG
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+
 class CroppedDataset(Dataset):
-    def __init__(self, img_dir, depth_dir, img_size=(320, 1024), source="depth", normalize_maps=False):
+    def __init__(self, img_dir, depth_dir, img_size=(320, 1024), source="depth", normalize_maps=False, crop_method = 'labels'):
         """
         Args:
             img_dir (string): Directory with all the images.
@@ -56,6 +58,10 @@ class CroppedDataset(Dataset):
             transforms.ToTensor(),  # Convert to tensor
             #transforms.Normalize([0.5], [0.5])  # Normalize for input to Monodepth2 (scaled to [-1, 1])
         ])
+
+        self.crop_method = crop_method
+
+        self.box_list = np.zeros((len(self.image_files),4),dtype=int)
     
     def __len__(self):
         return len(self.image_files)
@@ -65,10 +71,46 @@ class CroppedDataset(Dataset):
         img_path = os.path.join(self.img_dir, self.image_files[idx])
         depth_path = os.path.join(self.depth_dir, self.depth_files[idx])
 
-        box = self.labels.iloc[idx]['bound-box']
 
         image = Image.open(img_path).convert('RGB')  # Open as RGB to ensure 3 channels (Monodepth2 expects this)
         depth = Image.open(depth_path).convert('I;16')  # Depth maps are single-channel
+
+        if self.crop_method == 'labels':
+            box = self.labels.iloc[idx]['bound-box']
+        elif self.crop_method == 'yolo':
+            model = YOLO("yolo-weigths/best.pt")
+
+            # Predizione
+            results = model.predict(
+                source=image,
+                save=False,
+                save_txt=False,
+                conf=0.5,
+                imgsz=1024,
+                project="runs/trajectory",
+                name="envisat-test",
+                max_det=10
+            )
+
+            # Process result: get the top-confidence box
+            W, H = image.size
+            boxes = results[0].boxes
+            if boxes is not None and len(boxes) > 0:
+                box = boxes[torch.argmax(boxes.conf)]
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                w, h = (x2 - x1) * 1.3, (y2 - y1) * 1.3  # espansione 30%
+
+                # Calcola nuovo box con clipping
+                new_x1 = int(max(0, cx - w / 2))
+                new_y1 = int(max(0, cy - h / 2))
+                new_x2 = int(min(W, cx + w / 2))
+                new_y2 = int(min(H, cy + h / 2))
+
+                box = [new_x1, new_y1, new_x2, new_y2]
+
+            else:
+                box = None
 
 
         # Convert to numpy arrays
@@ -81,11 +123,17 @@ class CroppedDataset(Dataset):
         if self.normalize_maps:
             depth = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
 
+
+        if box == [0, 0, 0, 0]:
+            box = None
+
         if box is not None:
             # Crop images on target
-            expand = random.randint(10, 30)
+            #expand = random.randint(10, 30)
+            expand = 0
 
-            x_min, y_min, x_max, y_max = box
+            x_min, y_min, x_max, y_max = map(int,box)
+            self.box_list[idx,:] = np.array((x_min, y_min, x_max, y_max))
             x_min = max(0, x_min - expand)
             y_min = max(0, y_min - expand)
             x_max = min(image.shape[1], x_max + expand)
@@ -117,9 +165,9 @@ class CroppedDataset(Dataset):
 
         ### Data augmentation
         # Random augmentations (consistent for image and depth map)
-        if random.random() > 0.5:  # Horizontal flip
-            image = transforms.functional.hflip(image)
-            depth = transforms.functional.hflip(depth)
+        # if random.random() > 0.5:  # Horizontal flip
+        #     image = transforms.functional.hflip(image)
+        #     depth = transforms.functional.hflip(depth)
         # if random.random() > 0.5:  # Random small rotation
         #     angle = random.uniform(-5, 5)
         #     image = transforms.functional.rotate(image, angle)
@@ -132,6 +180,39 @@ class CroppedDataset(Dataset):
 
 
         return {'image': image, 'depth': depth}
+    
+    def restore_image(self,cropped_depth, idx):
+
+        # Create white image and zero depth map (or np.nan if preferred)
+        expand = 0  # Can still adjust if needed
+        image = os.path.join(self.depth_dir, self.depth_files[idx])
+        image = Image.open(image).convert('I;16')
+        original_height, original_width = image.size
+        
+        box = self.box_list[idx,:]
+        #box = self.labels.iloc[idx]['bound-box']
+        check = box == [0,0,0,0]
+        if box is not None and not np.array_equal(box, [0,0,0,0]): 
+            print(box)
+            x_min, y_min, x_max, y_max = box
+
+            cropped_depth = cv2.resize(cropped_depth, (x_max-x_min,y_max-y_min))
+            canvas_depth = np.ones((original_height, original_width), dtype=np.uint16) * 65535
+
+            canvas_depth[y_min:y_max, x_min:x_max] = cropped_depth
+
+            depth = canvas_depth
+
+            #depth = Image.fromarray(depth)
+
+            pred_depth_min = np.min(depth)
+            pred_depth_max = np.max(depth)
+            
+            depth = (depth - pred_depth_min) / (pred_depth_max - pred_depth_min + 1e-8)*65535  
+
+            return depth.astype('uint16')
+        else:
+            return np.full((1024, 1024), 65535, dtype=np.uint16)
 
 class ScaleInvariantLoss(nn.Module):
     def __init__(self):
